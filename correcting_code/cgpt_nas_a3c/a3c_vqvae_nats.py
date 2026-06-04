@@ -854,7 +854,7 @@ def encoding_to_nats_arch(tree_encoding):
 ################################################################################
 def main():
 
-    os.makedirs("results", exist_ok=True)
+    os.makedirs("results_a3c", exist_ok=True)
 
     tf.random.set_seed(42)
     np.random.seed(42)
@@ -890,10 +890,10 @@ def main():
     # -----------------------------
     # Save RL training artifacts (PLOTS)
     # -----------------------------
-    save_reward_plot(reward_history, "results")
-    save_loss_plot(actor_loss_history, critic_loss_history, "results")
-    save_architecture_heatmap(architecture_history, "results")
-    save_best_architecture(best_arch, best_reward, "results")
+    save_reward_plot(reward_history, "results_a3c")
+    save_loss_plot(actor_loss_history, critic_loss_history, "results_a3c")
+    save_architecture_heatmap(architecture_history, "results_a3c")
+    save_best_architecture(best_arch, best_reward, "results_a3c")
 
     # -----------------------------
     # Save run in JSON format (for your evaluation loader)
@@ -907,7 +907,7 @@ def main():
     }
 
     run_path = os.path.join(
-        "results",
+        "results_a3c",
         f"nats_a3c_run_{int(np.random.randint(0, 1e9))}.json"
     )
 
@@ -922,7 +922,7 @@ def main():
     print("\nBest architecture found:", best_arch)
     print("Best reward (NATS accuracy):", best_reward)
 
-    print("\nTraining artifacts saved to ./results")
+    print("\nTraining artifacts saved to ./results_a3c")
 
 
 

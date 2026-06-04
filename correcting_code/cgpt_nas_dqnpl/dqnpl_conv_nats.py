@@ -3,7 +3,8 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from collections import deque
 from nats_bench import create
-
+import os, json
+import matplotlib.pyplot as plt
 
 # =========================================================
 # CONFIG (MATCHING YOUR SETUP)
@@ -166,6 +167,9 @@ def train_softq_nas(episodes=100, batch_size=32):
     best_reward = -1e9
     best_arch = None
 
+    reward_history = []
+    architecture_history = []
+
     for ep in range(episodes):
 
         state = env.reset()
@@ -250,15 +254,36 @@ def train_softq_nas(episodes=100, batch_size=32):
 
         print(f"Episode {ep} | Reward={total_reward:.4f} | Arch={env.tree_encoding}")
 
-    return model, best_arch, best_reward
+        reward_history.append(total_reward)
+        architecture_history.append(env.tree_encoding.copy())
 
+    return model, best_arch, best_reward, reward_history, architecture_history
 
 # =========================================================
 # RUN
 # =========================================================
 
 if __name__ == "__main__":
-    model, best_arch, best_reward = train_softq_nas()
+    model, best_arch, best_reward, reward_history, architecture_history = train_softq_nas()
 
     print("\nBEST ARCH:", best_arch)
     print("BEST REWARD:", best_reward)
+
+    os.makedirs("results_dqn", exist_ok=True)
+
+    run_data = {
+        "best_arch": best_arch,
+        "best_reward": float(best_reward),
+        "reward_history": [float(x) for x in reward_history],
+        "architecture_history": architecture_history,
+    }
+
+    run_path = os.path.join(
+    "results",
+    f"nats_softq_run_{int(np.random.randint(0, 1e9))}.json"
+)
+
+    with open(run_path, "w") as f:
+        json.dump(run_data, f, indent=2)
+
+    print(f"Saved run to {run_path}")
