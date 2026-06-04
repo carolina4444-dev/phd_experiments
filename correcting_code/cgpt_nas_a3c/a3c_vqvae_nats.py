@@ -1,7 +1,8 @@
-import gym
+import gymnasium as gym
+from gymnasium import spaces
+
 import numpy as np
 import tensorflow as tf
-from gym import spaces
 from nats_bench import create
 
 
@@ -14,12 +15,17 @@ import json
 
 # CONFIGURATION
 
-max_nodes = 8
+max_nodes = 6
 train_epochs = 1
 SHOTS_PER_CLASS = 20
 
 MAX_NODES = max_nodes
-NUM_ACTIONS = 3
+NUM_ACTIONS = 5
+# 0 -> none
+# 1 -> skip_connect
+# 2 -> nor_conv_1x1
+# 3 -> nor_conv_3x3
+# 4 -> STOP
 NUM_HIDDEN = 128
 
 maxlen = 5
@@ -30,7 +36,7 @@ num_hidden = NUM_HIDDEN
 from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, Concatenate, GlobalAveragePooling1D, Dense
 from tensorflow.keras.models import Model
 
-from transformer_keras_io import *
+# from transformer_keras_io import *
 
 def build_tree_model(input_shape, num_classes, tree_encoding, max_length, vocab_size, embedding_dim):
     input_layer = Input(shape=input_shape)
@@ -87,13 +93,16 @@ class NATSNASEnv(gym.Env):
         self.api = api
         self.max_nodes = max_nodes
 
-        self.START_TOKEN = 3
-        self.PAD_TOKEN = 4
+        self.START_TOKEN = 5
+        self.PAD_TOKEN = 6
 
         self.action_space = spaces.Discrete(3)
 
         self.observation_space = spaces.Box(
-            low=0, high=4, shape=(max_nodes,), dtype=np.int32
+            low=0,
+            high=6,
+            shape=(max_nodes,),
+            dtype=np.int32,
         )
 
         self.reset()
@@ -108,7 +117,9 @@ class NATSNASEnv(gym.Env):
     def step(self, action):
         done = False
 
-        if action == 2:  # STOP
+        STOP_ACTION = 4
+
+        if action == STOP_ACTION:
             done = True
         else:
             self.tree_encoding.append(int(action))
@@ -117,7 +128,7 @@ class NATSNASEnv(gym.Env):
                 self.state[self.cursor] = action
                 self.cursor += 1
 
-            if len(self.tree_encoding) >= self.max_nodes:
+            if len(self.tree_encoding) >= 6:
                 done = True
 
         reward = 0.0
@@ -128,19 +139,40 @@ class NATSNASEnv(gym.Env):
         return self.state.copy(), reward, done, {}
 
     def evaluate_architecture(self):
-        arch = encoding_to_nats_arch(self.tree_encoding)
 
-        # NATS query (CIFAR-10 validation accuracy)
+        arch = encoding_to_nats_arch(
+            self.tree_encoding
+        )
+
+        idx = self.api.query_index_by_arch(
+            arch
+        )
+
+        if idx < 0:
+            print("Invalid architecture:", arch)
+            return 0.0
+
         info = self.api.get_more_info(
-            arch,
+            idx,
             dataset="cifar10",
-            hp="200",   # 12 or 200 epochs benchmark
+            hp="200",
             is_random=False,
         )
 
-        val_acc = info["valid-accuracy"]
+        print(info)
 
-        return float(val_acc)
+        if "valid-accuracy" in info:
+            reward = info["valid-accuracy"]
+        elif "test-accuracy" in info:
+            reward = info["test-accuracy"]
+        elif "accuracy" in info:
+            reward = info["accuracy"]
+        else:
+            raise RuntimeError(
+                f"Cannot find accuracy field. Keys={list(info.keys())}"
+            )
+
+        return float(reward)
 
 
 ################################################################################
@@ -227,7 +259,7 @@ def get_nas_actor_critic():
     )
 
     encoder = build_encoder_model(
-        input_shape=(MAX_NODES,)
+        input_shape=(MAX_NODES,), latent_dim=NUM_HIDDEN
     )
 
     x = encoder(inputs)
@@ -312,7 +344,7 @@ def train_nas_agent(
                 )
 
                 action = np.random.choice(
-                    3,
+                    NUM_ACTIONS,
                     p=action_probs.numpy()
                 )
 
@@ -653,28 +685,34 @@ class VectorQuantizer(layers.Layer):
         )
 
     def call(self, x):
-        # Calculate the input shape of the inputs and
-        # then flatten the inputs keeping `embedding_dim` intact.
         input_shape = tf.shape(x)
-        flattened = tf.reshape(x, [-1, self.embedding_dim])
 
-        # Quantization.
+        flattened = tf.reshape(
+            x,
+            [-1, self.embedding_dim]
+        )
+
+        # project to embedding space if needed
+        if flattened.shape[-1] != self.embedding_dim:
+            raise ValueError(
+                f"Last dim ({flattened.shape[-1]}) must equal embedding_dim ({self.embedding_dim})"
+            )
+
         encoding_indices = self.get_code_indices(flattened)
         encodings = tf.one_hot(encoding_indices, self.num_embeddings)
+
         quantized = tf.matmul(encodings, self.embeddings, transpose_b=True)
         quantized = tf.reshape(quantized, input_shape)
 
-        # Calculate vector quantization loss and add that to the layer. You can learn more
-        # about adding losses to different layers here:
-        # https://keras.io/guides/making_new_layers_and_models_via_subclassing/. Check
-        # the original paper to get a handle on the formulation of the loss function.
         commitment_loss = self.beta * tf.reduce_mean(
             (tf.stop_gradient(quantized) - x) ** 2
         )
-        codebook_loss = tf.reduce_mean((quantized - tf.stop_gradient(x)) ** 2)
+        codebook_loss = tf.reduce_mean(
+            (quantized - tf.stop_gradient(x)) ** 2
+        )
+
         self.add_loss(commitment_loss + codebook_loss)
 
-        # Straight-through estimator.
         quantized = x + tf.stop_gradient(quantized - x)
         return quantized
 
@@ -709,30 +747,65 @@ def get_encoder(inputs, head_size=256, num_heads=4, ff_dim=4, dropout=0.25):
     return encoder_outputs #keras.Model(inputs, encoder_outputs, name="encoder")
 
 
-def get_decoder(input_shape, mlp_units=[128], mlp_dropout=0.4):
-    #inputs = keras.Input(shape=build_encoder_model(input_shape).output.shape[1:])
-    inputs = keras.Input(shape=(input_shape))
+def get_decoder(seq_len, latent_dim,
+                mlp_units=[128],
+                mlp_dropout=0.4):
+
+    inputs = keras.Input(shape=(seq_len, latent_dim))
+
     x = inputs
+
     for dim in mlp_units:
         x = layers.Dense(dim, activation="relu")(x)
         x = layers.Dropout(mlp_dropout)(x)
-    outputs = layers.Dense(maxlen*num_actions, activation="relu")(x)
-    # x = tf.reshape(x, (-1, maxlen, num_actions))
-    # outputs = tf.argmax(x, axis=2)
-    return keras.Model(inputs, outputs)
+
+    x = layers.Flatten()(x)
+
+    outputs = layers.Dense(
+        maxlen * num_actions,
+        activation="relu"
+    )(x)
+
+    return keras.Model(inputs, outputs, name="decoder")
 
 
-def build_encoder_model(input_shape, head_size=256, num_heads=4, ff_dim=4, num_transformer_blocks=4, mlp_units=[128], dropout=0, mlp_dropout=0):
+def build_encoder_model(
+    input_shape,
+    latent_dim,
+    head_size=256,
+    num_heads=4,
+    ff_dim=4,
+    num_transformer_blocks=4,
+    dropout=0.1,
+):
+
+    # Normalize shape
+    if isinstance(input_shape, int):
+        seq_len = input_shape
+        input_shape = (input_shape,)
+    else:
+        seq_len = input_shape[0]
+
     inputs = layers.Input(shape=input_shape)
-    x = keras.backend.expand_dims(inputs, axis=-1)
+
+    x = layers.Reshape((seq_len, 1))(inputs)
+
+    x = layers.Conv1D(
+        filters=latent_dim,
+        kernel_size=1,
+        padding="same"
+    )(x)
+
     for _ in range(num_transformer_blocks):
-        x = get_encoder(x, head_size, num_heads, ff_dim, dropout)
+        x = get_encoder(
+            x,
+            head_size=head_size,
+            num_heads=num_heads,
+            ff_dim=ff_dim,
+            dropout=dropout,
+        )
 
-    #output = layers.GlobalAveragePooling1D(data_format="channels_first")(x)
-    output = x
-
-    return keras.Model(inputs, output)
-
+    return keras.Model(inputs, x, name="encoder")
 
 #######transformer position############################
 
@@ -807,49 +880,82 @@ class TokenAndPositionEmbedding(layers.Layer):
 
 
 
-def get_vqvae(output_dim, latent_dim=NUM_HIDDEN, num_embeddings=maxlen, input_shape=maxlen):
-    vq_layer = VectorQuantizer(latent_dim, num_embeddings, name="vector_quantizer")
-    encoder = build_encoder_model(input_shape)
-    decoder = get_decoder(input_shape)
+def get_vqvae(
+    output_dim,
+    latent_dim=NUM_HIDDEN,
+    num_embeddings=maxlen,
+    input_shape=maxlen,
+):
+
+    build_encoder_model(
+        input_shape=(maxlen,),
+        latent_dim=NUM_HIDDEN
+    )
+
+    decoder = get_decoder(
+        seq_len=input_shape,
+        latent_dim=latent_dim
+    )
+
+    vq_layer = VectorQuantizer(
+        num_embeddings=num_embeddings,
+        embedding_dim=latent_dim,
+        name="vector_quantizer"
+    )
+
+    if isinstance(input_shape, int):
+        input_shape = (input_shape,)
+
     inputs = keras.Input(shape=input_shape)
+
     encoder_outputs = encoder(inputs)
     quantized_latents = vq_layer(encoder_outputs)
+
     common = decoder(quantized_latents)
 
-    action = layers.Dense(output_dim, activation="softmax")(common)
-    critic = layers.Dense(1)(common)
+    action = layers.Dense(
+        output_dim,
+        activation="softmax",
+        name="actor"
+    )(common)
 
-    model = keras.Model(inputs, outputs=[action, critic], name="vq_vae")
+    critic = layers.Dense(
+        1,
+        name="critic"
+    )(common)
 
-    return model
+    return keras.Model(
+        inputs,
+        [action, critic],
+        name="vq_vae"
+    )
 
 ################################################################################
 
 def encoding_to_nats_arch(tree_encoding):
-    """
-    Convert your RL encoding into NATS adjacency matrix format.
-    NATS expects:
-      - 4 nodes (plus input/output implicit)
-      - 6 edges upper-triangular
-    """
 
-    ops = ["none", "skip_connect", "conv_1x1", "conv_3x3"]
+    ops = [
+        "none",
+        "skip_connect",
+        "nor_conv_1x1",
+        "nor_conv_3x3",
+    ]
 
-    arch = []
+    edge_ops = []
 
-    for op in tree_encoding:
-        if op == 0:
-            arch.append(1)  # skip_connect
-        elif op == 1:
-            arch.append(2)  # conv_1x1
-        else:
-            arch.append(3)  # conv_3x3
+    for a in tree_encoding[:6]:
+        edge_ops.append(ops[a])
 
-    # pad/truncate to 6 edges (NATS-TSS requirement)
-    arch = arch[:6]
-    arch += [1] * (6 - len(arch))
+    while len(edge_ops) < 6:
+        edge_ops.append("none")
 
-    return tuple(arch)
+    arch = (
+        f"|{edge_ops[0]}~0|+"
+        f"|{edge_ops[1]}~0|{edge_ops[2]}~1|+"
+        f"|{edge_ops[3]}~0|{edge_ops[4]}~1|{edge_ops[5]}~2|"
+    )
+
+    return arch
 
 ################################################################################
 def main():

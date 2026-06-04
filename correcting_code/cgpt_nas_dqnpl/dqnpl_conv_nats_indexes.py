@@ -58,6 +58,38 @@ def encoding_to_nats_arch(tree_encoding):
 # =========================================================
 # ENVIRONMENT (MATCH YOUR SEMANTICS EXACTLY)
 # =========================================================
+class NATSIndexEnv:
+
+    def __init__(self, api):
+        self.api = api
+        self.num_archs = len(api)
+
+    def reset(self):
+        # state is just current index (can be ignored or random)
+        return np.array([0], dtype=np.float32)
+
+    def step(self, action):
+        """
+        action = architecture index
+        """
+
+        index = int(action)
+
+        done = True
+
+        info = self.api.get_more_info(
+            index,
+            dataset="cifar10",
+            hp="200",
+            is_random=False
+        )
+
+        reward = float(info["valid-accuracy"])
+
+        next_state = np.array([index], dtype=np.float32)
+
+        return next_state, reward, done, {}
+
 
 class NATSNASEnvSoftQ:
 
