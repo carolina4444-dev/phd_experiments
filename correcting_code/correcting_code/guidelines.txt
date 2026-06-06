@@ -1,0 +1,272 @@
+For a PhD thesis on heuristic search applied to Neural Architecture Search (NAS), the strongest evaluation is usually not just "did it find a good architecture?" but:
+
+Solution quality
+Search efficiency
+Generalization
+Ablation of the heuristic
+Statistical significance
+
+A useful framework is to treat your heuristic as a search algorithm and evaluate it the same way heuristic search researchers evaluate planners or optimization methods.
+
+1. Compare Against Strong Baselines
+
+You need baselines from multiple NAS families:
+
+Random Search
+
+The most important baseline.
+
+Research has repeatedly shown that many NAS methods struggle to beat well-designed random search.
+
+Metrics:
+
+Best validation accuracy found
+Best test accuracy
+Search cost
+Evolutionary NAS
+
+Examples:
+
+Regularized Evolution for Image Classifier Architecture Search
+Reinforcement Learning NAS
+
+Examples:
+
+Neural Architecture Search with Reinforcement Learning
+Weight-Sharing NAS
+
+Examples:
+
+ENAS
+DARTS
+Search-Based Baselines
+
+Since your contribution is heuristic search, compare against:
+
+A*
+Greedy Best-First Search
+Beam Search
+Uniform Cost Search
+Monte Carlo Tree Search
+
+where applicable to your search space.
+
+2. Measure Search Efficiency
+
+This is often where heuristic methods shine.
+
+Report:
+
+Metric	Meaning
+Architectures evaluated	Total network candidates explored
+GPU hours	Total compute
+Wall-clock time	Real runtime
+FLOPs consumed	Computational cost
+Memory usage	Search overhead
+
+Example:
+
+Method	Accuracy	Models Evaluated
+Random Search	94.1%	10,000
+Evolution	94.3%	5,000
+Your Method	94.2%	800
+
+This can be a very compelling result.
+
+3. Regret Curves (Very Important)
+
+Plot:
+
+x-axis:
+
+search cost
+time
+number of evaluations
+
+y-axis:
+
+best architecture performance found so far
+
+This answers:
+
+How quickly does the method find good solutions?
+
+These curves are standard in optimization and NAS.
+
+A good heuristic often dominates here even if final accuracy is similar.
+
+4. Evaluate the Heuristic Itself
+
+As a heuristic-search contribution, you must show the heuristic is actually useful.
+
+Measure:
+
+Search Reduction
+Reduction=1−
+nodes expanded by uninformed search
+nodes expanded by heuristic
+	​
+
+Correlation with True Quality
+
+If your heuristic estimates architecture quality:
+
+Compute:
+
+Pearson correlation
+Spearman rank correlation
+
+between:
+
+heuristic estimate
+actual architecture performance
+
+Higher correlation → better guidance.
+
+5. Ablation Studies
+
+Probably the most important section.
+
+Suppose your evaluation function is:
+
+f(n)=g(n)+h(n)
+
+Run:
+
+Full method
+Without heuristic
+Heuristic only
+Different heuristic weights
+Different beam widths
+Different pruning thresholds
+
+Example:
+
+Variant	Accuracy
+Full	95.1
+No heuristic	93.8
+Simplified heuristic	94.3
+
+This demonstrates where gains come from.
+
+6. Benchmark Search Spaces
+
+Use established NAS benchmarks when possible.
+
+NAS-Bench-101
+
+NAS-Bench-101
+
+Advantages:
+
+Exact architecture performance known.
+Reproducible.
+Enables many repeated runs.
+NAS-Bench-201
+
+NAS-Bench-201
+
+NAS-Bench-301
+
+NAS-Bench-301
+
+These are especially valuable because they remove training noise and let you isolate search quality.
+
+7. Statistical Evaluation
+
+NAS is highly stochastic.
+
+Run:
+
+20–50 seeds if feasible
+At minimum 10 seeds
+
+Report:
+
+μ±σ
+
+for:
+
+best accuracy
+search time
+architectures evaluated
+
+Use:
+
+Wilcoxon signed-rank test
+Mann–Whitney U
+paired t-test (if assumptions hold)
+
+Report p-values and effect sizes.
+
+8. Scalability Analysis
+
+Show what happens as search space grows.
+
+For example:
+
+Search Space Size	Random	Your Method
+10^3	200 evals	40 evals
+10^4	2000 evals	120 evals
+10^5	20000 evals	400 evals
+
+This demonstrates why the heuristic matters.
+
+9. Architecture Quality Beyond Accuracy
+
+Report:
+
+Accuracy
+Parameters
+FLOPs
+Latency
+Energy consumption
+Model size
+
+A heuristic that finds smaller models with similar accuracy can be a stronger contribution than one that improves accuracy by 0.2%.
+
+Consider a Pareto-front analysis for:
+
+Accuracy vs FLOPs
+Accuracy vs latency
+10. If Your Thesis Is Primarily About Heuristic Search
+
+Then your main research questions should look like:
+
+RQ1: Does the heuristic reduce search effort?
+
+RQ2: Does it improve anytime performance?
+
+RQ3: Does it scale better than uninformed search?
+
+RQ4: Does it maintain solution quality while reducing computational cost?
+
+RQ5: How sensitive is performance to heuristic accuracy?
+
+Those questions are often more scientifically interesting than a small improvement in final test accuracy.
+
+A strong PhD-level evaluation typically includes:
+
+NAS-Bench experiments (controlled search evaluation)
+Real training experiments (e.g., CIFAR-10, ImageNet subset)
+Regret/anytime curves
+Search-cost analysis
+Heuristic ablations
+Statistical significance tests
+
+That combination demonstrates both search-theoretic merit and practical NAS effectiveness, which is exactly what examiners usually look for in a heuristic-search thesis.
+
+
+
+Expected Research Claims
+
+After this evaluation, you should be able to make claims such as:
+
+The heuristic reduces node expansions by 70–90%.
+The heuristic reaches near-optimal architectures 5–10× faster.
+Search cost scales sublinearly compared with baseline methods.
+Architecture quality is maintained or improved.
+Improvements are statistically significant (p < 0.05).
+Heuristic estimates strongly correlate with true architecture performance.
+
+Those six claims together form a very strong heuristic-search-for-NAS thesis evaluation.

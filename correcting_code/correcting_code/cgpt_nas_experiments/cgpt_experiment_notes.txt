@@ -1,0 +1,42 @@
+Methods:
+    random
+    greedy
+    heuristic
+
+Seeds:
+    30
+
+Budgets:
+    100
+    500
+    1000
+    5000
+
+Datasets:
+    CIFAR10
+
+
+Run as a SLURM array and save each run to:
+
+results/
+    random_seed0_budget100.csv
+    random_seed1_budget100.csv
+    ...
+    heuristic_seed29_budget5000.csv
+
+
+    
+after the baselines job finishes, run:
+python analyze_results.py
+
+SLURM ARRAY
+    ↓
+270 independent runs
+    ↓
+results/*.json
+    ↓
+analyze_results.py
+    ↓
+tables + plots + significance tests
+    ↓
+thesis figures
