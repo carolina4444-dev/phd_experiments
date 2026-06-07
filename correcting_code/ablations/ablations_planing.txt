@@ -1,0 +1,63 @@
+ABLATION STUDIES
+
+RL vs random search
+
+RL algorithm comparison (e.g. reinforce vs DQN)
+
+Exploration strategy (entropy, epsilon greedy)
+
+State encoding ablations (with/without positional encoding for nodes)
+
+Action space ablations
+
+Reward design ablations
+
+Search budget / efficiency ablations
+
+Replay memory ablations
+
+Initialization ablations (compare with others)
+
+Benchmark level generalization (NATS), NATS has multiple datasets, change CIFAR 10 to CIFAR 100
+
+
+----------
+
+Gumbel softmax vs argmax output layer for the action odds. compare the searches (fully diferentiable approach)
+
+Action masks (one hot for action selection), with and without
+
+Loggits vs odds in output interpretation (softmax ablation), with and without
+
+Heuristics (see chat gpt for sugestions), different heuristics + complexity (flops)
+
+Entropy regularization, with or without, analyse curves
+
+A3C advantage ablation (A2C)
+
+Experience replay with/without: diferent replay buffer sizes, sampling: random vs prioritized experience replay
+
+A3C hybrid approach: policy network ablation 
+
+Sequence refinement usage vs single model
+
+Gumbel softmax vs argmax output layer for the action odds. compare the searches (fully diferentiable approach)
+
+Action masks (one hot for action selection), with and without
+
+Loggits vs odds in output interpretation (softmax ablation), with and without
+
+Heuristics (see chat gpt for sugestions), different heuristics + complexity (flops)
+
+Entropy regularization, with or without, analyse curves
+
+A3C advantage ablation (A2C)
+
+Experience replay with/without: diferent replay buffer sizes, sampling: random vs prioritized experience replay
+
+A3C hybrid approach: policy network ablation 
+
+Sequence refinement usage vs single model
+
+----------
+

@@ -18,4 +18,4 @@ mkdir -p logs_dqnpl
 source .venv/bin/activate
 
 # run script
-python3 dqnpl_conv_nats.py
+python3 dqnpl_conv_nats_refinement_v2.py

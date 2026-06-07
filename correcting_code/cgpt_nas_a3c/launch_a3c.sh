@@ -18,4 +18,4 @@ mkdir -p logs_a3c
 source .venv/bin/activate
 
 # run script
-python3 a3c_vqvae_nats.py
+python3 nats_refinement_dual_actor_critic.py
