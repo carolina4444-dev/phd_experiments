@@ -365,6 +365,19 @@ def train_nas_agent(
                     p=position_probs.numpy()
                 )
 
+                # -------------------------------------
+                # ENV STEP
+                # -------------------------------------
+
+                next_state, reward, done, _, _ = (
+                    env.step(
+                        (
+                            position,
+                            action
+                        )
+                    )
+                )
+
                 action_log_prob = tf.math.log(
                     action_probs[action] + 1e-8
                 )

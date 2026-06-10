@@ -26,6 +26,21 @@ import tensorflow as tf
 
 import matplotlib.pyplot as plt
 
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+
+import gymnasium as gym
+from gymnasium import spaces
+
+import numpy as np
+import tensorflow as tf
+
+from nats_bench import create
+
+
+
+
 # ============================================================
 # CONSTANTS
 # ============================================================
@@ -162,7 +177,9 @@ class ExperimentConfig:
     output_root: str = "results"
 
     nats_path: str = (
-        "./NATS-tss-v1_0-3ffb9-simple"
+        "/data/ccarvalho/phd_working/"
+        "cgpt_nas_experiemnts/benchmarks/"
+        "NATS-tss-v1_0-3ffb9-simple"
     )
 
 # ============================================================
@@ -625,9 +642,7 @@ def save_loss_plot(
 # PART 2 — NETWORKS (TRANSFORMER + VQ-VAE POLICY)
 # ============================================================
 
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
+
 
 # ============================================================
 # TRANSFORMER BLOCK
@@ -746,7 +761,7 @@ def build_encoder(cfg):
     )
 
     x = layers.Dense(128, activation="relu")(inputs)
-    x = layers.Reshape((STATE_LEN, 1))(x)
+    x = layers.Reshape((STATE_LEN, STATE_LEN*2))(x)
 
     for _ in range(2):
 
@@ -902,13 +917,6 @@ def sample_action(
 # PART 3 — ENV + AGENTS + TRAINING CORE
 # ============================================================
 
-import gymnasium as gym
-from gymnasium import spaces
-
-import numpy as np
-import tensorflow as tf
-
-from nats_bench import create
 
 # ============================================================
 # ENVIRONMENT
@@ -1084,10 +1092,15 @@ class RandomSearchAgent:
 
             print(f"[Random] ep={ep} acc={acc:.4f}")
 
+        # return {
+        #     "best_accuracy": best_acc,
+        #     "best_arch": best_arch,
+        #     "history": history
+        # }
         return {
-            "best_accuracy": best_acc,
-            "best_arch": best_arch,
-            "history": history
+            "best_accuracy": float(best_acc),
+            "best_arch": best_arch.tolist(),
+            "history": [float(x) for x in history]
         }
 
 # ============================================================
@@ -1100,12 +1113,25 @@ class A2CAgent:
 
         self.env = env
 
-        self.model = build_vqvae_policy(
+        # predicts operation
+        self.action_model = build_vqvae_policy(
+            cfg=env.cfg,
+            action_dim=NUM_OPS
+        )
+
+        # predicts edge position
+        self.position_model = build_vqvae_policy(
             cfg=env.cfg,
             action_dim=NUM_EDGES
         )
 
-        self.optimizer = tf.keras.optimizers.Adam(1e-4)
+        self.optimizer_action = (
+            tf.keras.optimizers.Adam(1e-4)
+        )
+
+        self.optimizer_position = (
+            tf.keras.optimizers.Adam(1e-4)
+        )
 
     # --------------------------------------------------------
     # TRAIN
@@ -1127,111 +1153,322 @@ class A2CAgent:
 
         history = []
 
+        actor_loss_history = []
+        critic_loss_history = []
+
         for ep in range(episodes):
 
             state, _ = self.env.reset()
 
             done = False
 
-            log_probs = []
-            values = []
+            action_log_probs = []
+            position_log_probs = []
+
+            action_values = []
+            position_values = []
+
             rewards = []
 
-            with tf.GradientTape() as tape:
+            with tf.GradientTape(persistent=True) as tape:
 
                 while not done:
 
-                    s = tf.convert_to_tensor(
-                        state[None, :],
-                        dtype=tf.float32
+                    state_tensor = tf.expand_dims(
+                        tf.convert_to_tensor(
+                            state,
+                            dtype=tf.float32
+                        ),
+                        axis=0
                     )
 
-                    logits, value = self.model(s, training=True)
+                    # -------------------------------------
+                    # ACTION POLICY (operation)
+                    # -------------------------------------
 
-                    logits = tf.squeeze(logits)
-                    value = tf.squeeze(value)
+                    action_logits, action_value = (
+                        self.action_model(
+                            state_tensor,
+                            training=True
+                        )
+                    )
 
-                    probs = tf.nn.softmax(logits).numpy()
+                    action_probs = tf.nn.softmax(
+                        tf.squeeze(action_logits)
+                    )
 
                     action = np.random.choice(
-                        len(probs),
-                        p=probs
+                        NUM_OPS,
+                        p=action_probs.numpy()
                     )
 
-                    log_prob = tf.math.log(
-                        probs[action] + 1e-8
+                    action_log_prob = tf.math.log(
+                        action_probs[action] + 1e-8
                     )
 
-                    position = np.random.randint(
-                        0,
-                        NUM_EDGES
+                    # -------------------------------------
+                    # POSITION POLICY
+                    # -------------------------------------
+
+                    position_logits, position_value = (
+                        self.position_model(
+                            state_tensor,
+                            training=True
+                        )
                     )
 
-                    state, reward, done, _, _ = self.env.step(
-                        (position, action)
+                    position_probs = tf.nn.softmax(
+                        tf.squeeze(position_logits)
                     )
 
-                    log_probs.append(log_prob)
-                    values.append(value)
+                    position = np.random.choice(
+                        NUM_EDGES,
+                        p=position_probs.numpy()
+                    )
+
+                    position_log_prob = tf.math.log(
+                        position_probs[position] + 1e-8
+                    )
+
+                    # -------------------------------------
+                    # ENV STEP
+                    # -------------------------------------
+
+                    next_state, reward, done, _, _ = (
+                        self.env.step(
+                            (
+                                position,
+                                action
+                            )
+                        )
+                    )
+
+                    action_log_probs.append(
+                        action_log_prob
+                    )
+
+                    position_log_probs.append(
+                        position_log_prob
+                    )
+
+                    action_values.append(
+                        tf.squeeze(action_value)
+                    )
+
+                    position_values.append(
+                        tf.squeeze(position_value)
+                    )
+
                     rewards.append(reward)
 
-            # ------------------------------------------------
-            # RETURNS
-            # ------------------------------------------------
+                    state = next_state
 
-            returns = []
-            G = 0
+                # -----------------------------------------
+                # RETURNS
+                # -----------------------------------------
 
-            for r in reversed(rewards):
+                returns = []
 
-                G = r + GAMMA * G
-                returns.insert(0, G)
+                discounted_sum = 0.0
 
-            returns = tf.convert_to_tensor(
-                returns,
-                dtype=tf.float32
-            )
+                for r in reversed(rewards):
 
-            if len(returns) > 1:
+                    discounted_sum = (
+                        r +
+                        GAMMA * discounted_sum
+                    )
 
-                returns = (
-                    returns - tf.reduce_mean(returns)
-                ) / (
-                    tf.math.reduce_std(returns) + 1e-8
+                    returns.insert(
+                        0,
+                        discounted_sum
+                    )
+
+                returns = tf.convert_to_tensor(
+                    returns,
+                    dtype=tf.float32
                 )
 
-            # ------------------------------------------------
-            # LOSS
-            # ------------------------------------------------
+                if len(returns) > 1:
 
-            policy_loss = 0
-            value_loss = 0
+                    returns = (
+                        returns
+                        - tf.reduce_mean(
+                            returns
+                        )
+                    ) / (
+                        tf.math.reduce_std(
+                            returns
+                        )
+                        + 1e-8
+                    )
 
-            for log_p, v, R in zip(
-                log_probs,
-                values,
-                returns
-            ):
+                # -----------------------------------------
+                # ACTION LOSSES
+                # -----------------------------------------
 
-                adv = R - v
+                action_actor_losses = []
+                action_critic_losses = []
 
-                policy_loss += -log_p * tf.stop_gradient(adv)
+                for log_prob, value, ret in zip(
+                    action_log_probs,
+                    action_values,
+                    returns
+                ):
 
-                value_loss += tf.square(adv)
+                    advantage = ret - value
 
-            loss = policy_loss + value_loss
+                    action_actor_losses.append(
+                        -log_prob *
+                        tf.stop_gradient(
+                            advantage
+                        )
+                    )
 
-            grads = tape.gradient(
-                loss,
-                self.model.trainable_variables
-            )
+                    action_critic_losses.append(
+                        tf.square(
+                            advantage
+                        )
+                    )
 
-            self.optimizer.apply_gradients(
-                zip(
-                    grads,
-                    self.model.trainable_variables
+                # -----------------------------------------
+                # POSITION LOSSES
+                # -----------------------------------------
+
+                position_actor_losses = []
+                position_critic_losses = []
+
+                for log_prob, value, ret in zip(
+                    position_log_probs,
+                    position_values,
+                    returns
+                ):
+
+                    advantage = ret - value
+
+                    position_actor_losses.append(
+                        -log_prob *
+                        tf.stop_gradient(
+                            advantage
+                        )
+                    )
+
+                    position_critic_losses.append(
+                        tf.square(
+                            advantage
+                        )
+                    )
+
+                action_actor_loss = tf.reduce_mean(
+                    action_actor_losses
                 )
+
+                action_critic_loss = tf.reduce_mean(
+                    action_critic_losses
+                )
+
+                position_actor_loss = tf.reduce_mean(
+                    position_actor_losses
+                )
+
+                position_critic_loss = tf.reduce_mean(
+                    position_critic_losses
+                )
+
+                actor_loss_history.append(
+                    float(
+                        (
+                            action_actor_loss +
+                            position_actor_loss
+                        ).numpy()
+                    )
+                )
+
+                critic_loss_history.append(
+                    float(
+                        (
+                            action_critic_loss +
+                            position_critic_loss
+                        ).numpy()
+                    )
+                )
+
+                total_action_loss = (
+                    tf.add_n(
+                        action_actor_losses
+                    )
+                    +
+                    tf.add_n(
+                        action_critic_losses
+                    )
+                )
+
+                total_position_loss = (
+                    tf.add_n(
+                        position_actor_losses
+                    )
+                    +
+                    tf.add_n(
+                        position_critic_losses
+                    )
+                )
+
+                # add VQ losses
+
+                if self.action_model.losses:
+                    total_action_loss += tf.add_n(
+                        self.action_model.losses
+                    )
+
+                if self.position_model.losses:
+                    total_position_loss += tf.add_n(
+                        self.position_model.losses
+                    )
+
+            # -----------------------------------------
+            # ACTION GRADIENTS
+            # -----------------------------------------
+
+            action_grads = tape.gradient(
+                total_action_loss,
+                self.action_model.trainable_variables
             )
+
+            action_grads = [
+                (g, v)
+                for g, v in zip(
+                    action_grads,
+                    self.action_model.trainable_variables
+                )
+                if g is not None
+            ]
+
+            self.optimizer_action.apply_gradients(
+                action_grads
+            )
+
+            # -----------------------------------------
+            # POSITION GRADIENTS
+            # -----------------------------------------
+
+            position_grads = tape.gradient(
+                total_position_loss,
+                self.position_model.trainable_variables
+            )
+
+            position_grads = [
+                (g, v)
+                for g, v in zip(
+                    position_grads,
+                    self.position_model.trainable_variables
+                )
+                if g is not None
+            ]
+
+            self.optimizer_position.apply_gradients(
+                position_grads
+            )
+
+            del tape
 
             ep_acc = self.env.current_accuracy
 
@@ -1240,16 +1477,22 @@ class A2CAgent:
             if ep_acc > best_acc:
 
                 best_acc = ep_acc
-                best_arch = self.env.architecture.copy()
+                best_arch = (
+                    self.env.architecture.copy()
+                )
 
             print(
-                f"[A2C] ep={ep} acc={ep_acc:.4f} best={best_acc:.4f}"
+                f"[A2C] ep={ep} "
+                f"acc={ep_acc:.4f} "
+                f"best={best_acc:.4f}"
             )
 
         return {
-            "best_accuracy": best_acc,
-            "best_arch": best_arch,
-            "history": history
+            "best_accuracy": float(best_acc),
+            "best_arch": best_arch.tolist(),
+            "history": [float(x) for x in history],
+            "actor_loss_history": actor_loss_history,
+            "critic_loss_history": critic_loss_history,
         }
 
 # ============================================================
