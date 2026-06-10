@@ -18,4 +18,4 @@ mkdir -p logs_dqnpl_ablations
 source .venv/bin/activate
 
 # run script
-python3 dqnpl_ablations_full.py
+python3 dqnpl_ablations_full_v2.py
